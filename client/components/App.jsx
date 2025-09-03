@@ -53,6 +53,11 @@ function RealtimeConsole() {
         },
       });
 
+      if (!sdpResponse.ok) {
+        const errorText = await sdpResponse.text();
+        throw new Error(`Server error (${sdpResponse.status}): ${errorText}`);
+      }
+
       const sdp = await sdpResponse.text();
       const answer = { type: "answer", sdp };
       await pc.setRemoteDescription(answer);

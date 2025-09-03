@@ -33,7 +33,7 @@ const openaiLimiter = rateLimit({
 });
 
 app.use(express.json());
-app.use(express.text());
+app.use(express.text({ type: '*/*' }));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -190,13 +190,11 @@ app.get('/api/user', authenticateToken, async (req, res) => {
 
 // OpenAI session configuration
 const sessionConfig = JSON.stringify({
-  session: {
-    type: "realtime",
-    model: "gpt-realtime",
-    audio: {
-      output: {
-        voice: "cedar",
-      },
+  type: "realtime",
+  model: "gpt-realtime",
+  audio: {
+    output: {
+      voice: "cedar",
     },
   },
 });
@@ -229,11 +227,7 @@ app.post("/api/session", authenticateToken, trackUsage, openaiLimiter, async (re
     console.log('OpenAI API response headers:', Object.fromEntries(response.headers));
     console.log('OpenAI API SDP response:', sdp);
 
-    if (!response.ok) {
-      console.error('OpenAI API error response:', sdp);
-      return res.status(response.status).json({ error: 'OpenAI API error', details: sdp });
-    }
-
+    // Send back the SDP we received from the OpenAI REST API
     res.send(sdp);
   } catch (error) {
     console.error("Session creation error:", error);
@@ -251,7 +245,7 @@ app.get("/api/token", authenticateToken, trackUsage, openaiLimiter, async (req, 
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: sessionConfig,
+        body: JSON.stringify({ session: JSON.parse(sessionConfig) }),
       },
     );
 
