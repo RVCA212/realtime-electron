@@ -3,58 +3,65 @@ import logo from "/assets/openai-logomark.svg";
 import EventLog from "./EventLog";
 import SessionControls from "./SessionControls";
 import ToolPanel from "./ToolPanel";
+import AuthForm from "./AuthForm";
+import UserInfo from "./UserInfo";
+import { AuthProvider, useAuth } from "../contexts/AuthContext";
 
-export default function App() {
+function RealtimeConsole() {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [events, setEvents] = useState([]);
   const [dataChannel, setDataChannel] = useState(null);
   const peerConnection = useRef(null);
   const audioElement = useRef(null);
+  const { apiCall } = useAuth();
 
   async function startSession() {
-    // Get a session token for OpenAI Realtime API
-    const tokenResponse = await fetch("/token");
-    const data = await tokenResponse.json();
-    const EPHEMERAL_KEY = data.value;
+    try {
+      // Get a session token for OpenAI Realtime API through our authenticated server
+      const tokenResponse = await apiCall("/token");
+      const data = await tokenResponse.json();
+      const EPHEMERAL_KEY = data.value;
 
-    // Create a peer connection
-    const pc = new RTCPeerConnection();
+      // Create a peer connection
+      const pc = new RTCPeerConnection();
 
-    // Set up to play remote audio from the model
-    audioElement.current = document.createElement("audio");
-    audioElement.current.autoplay = true;
-    pc.ontrack = (e) => (audioElement.current.srcObject = e.streams[0]);
+      // Set up to play remote audio from the model
+      audioElement.current = document.createElement("audio");
+      audioElement.current.autoplay = true;
+      pc.ontrack = (e) => (audioElement.current.srcObject = e.streams[0]);
 
-    // Add local audio track for microphone input in the browser
-    const ms = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-    });
-    pc.addTrack(ms.getTracks()[0]);
+      // Add local audio track for microphone input in the browser
+      const ms = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+      });
+      pc.addTrack(ms.getTracks()[0]);
 
-    // Set up data channel for sending and receiving events
-    const dc = pc.createDataChannel("oai-events");
-    setDataChannel(dc);
+      // Set up data channel for sending and receiving events
+      const dc = pc.createDataChannel("oai-events");
+      setDataChannel(dc);
 
-    // Start the session using the Session Description Protocol (SDP)
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
+      // Start the session using the Session Description Protocol (SDP)
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
 
-    const baseUrl = "https://api.openai.com/v1/realtime/calls";
-    const model = "gpt-realtime";
-    const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
-      method: "POST",
-      body: offer.sdp,
-      headers: {
-        Authorization: `Bearer ${EPHEMERAL_KEY}`,
-        "Content-Type": "application/sdp",
-      },
-    });
+      // Use our server as proxy instead of calling OpenAI directly
+      const sdpResponse = await apiCall("/session", {
+        method: "POST",
+        body: offer.sdp,
+        headers: {
+          "Content-Type": "text/plain",
+        },
+      });
 
-    const sdp = await sdpResponse.text();
-    const answer = { type: "answer", sdp };
-    await pc.setRemoteDescription(answer);
+      const sdp = await sdpResponse.text();
+      const answer = { type: "answer", sdp };
+      await pc.setRemoteDescription(answer);
 
-    peerConnection.current = pc;
+      peerConnection.current = pc;
+    } catch (error) {
+      console.error("Failed to start session:", error);
+      alert("Failed to start session. Please try again.");
+    }
   }
 
   // Stop current session, clean up peer connection and data channel
@@ -166,6 +173,7 @@ export default function App() {
           </section>
         </section>
         <section className="absolute top-0 w-[380px] right-0 bottom-0 p-4 pt-0 overflow-y-auto">
+          <UserInfo />
           <ToolPanel
             sendClientEvent={sendClientEvent}
             sendTextMessage={sendTextMessage}
@@ -176,4 +184,33 @@ export default function App() {
       </main>
     </>
   );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
+}
+
+function AppContent() {
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <AuthForm />;
+  }
+
+  return <RealtimeConsole />;
 }
