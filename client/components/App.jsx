@@ -1,26 +1,80 @@
 import { useEffect, useRef, useState } from "react";
-import EventLog from "./EventLog";
-import SessionControls from "./SessionControls";
-import ToolPanel from "./ToolPanel";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import AuthForm from "./AuthForm";
-import UserInfo from "./UserInfo";
-import DraggableHeader from "./DraggableHeader";
+import Console from "../pages/Console";
+import Settings from "../pages/Settings";
 import { AuthProvider, useAuth } from "../contexts/AuthContext";
 
 function RealtimeConsole() {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [events, setEvents] = useState([]);
   const [dataChannel, setDataChannel] = useState(null);
+  const [currentSystemPrompt, setCurrentSystemPrompt] = useState(null);
+  const [currentVoice, setCurrentVoice] = useState(null);
+  const [savedSystemPrompt, setSavedSystemPrompt] = useState(null);
+  const [savedVoice, setSavedVoice] = useState(null);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const peerConnection = useRef(null);
   const audioElement = useRef(null);
   const { apiCall } = useAuth();
 
-  async function startSession() {
+  // Load user settings from backend
+  async function loadUserSettings() {
+    if (settingsLoaded) return; // Don't reload if already loaded
+
     try {
+      const [promptResponse, voiceResponse] = await Promise.all([
+        apiCall("/system-prompt"),
+        apiCall("/voice")
+      ]);
+
+      if (promptResponse.ok) {
+        const promptData = await promptResponse.json();
+        setSavedSystemPrompt(promptData.prompt);
+      }
+
+      if (voiceResponse.ok) {
+        const voiceData = await voiceResponse.json();
+        setSavedVoice(voiceData.voice);
+      }
+
+      setSettingsLoaded(true);
+    } catch (error) {
+      console.error("Failed to load user settings:", error);
+      setSettingsLoaded(true); // Mark as loaded even on error to prevent infinite retries
+    }
+  }
+
+  async function startSession(customSystemPrompt = null, customVoice = null) {
+    try {
+      // Load saved settings if not already loaded
+      await loadUserSettings();
+
+      // Use saved settings as defaults, with custom parameters as overrides
+      const effectiveSystemPrompt = customSystemPrompt || savedSystemPrompt;
+      const effectiveVoice = customVoice || savedVoice;
+
+      // Prepare headers for token request with effective system prompt and voice
+      const tokenHeaders = {};
+      if (effectiveSystemPrompt) {
+        tokenHeaders["x-system-prompt"] = effectiveSystemPrompt;
+        setCurrentSystemPrompt(effectiveSystemPrompt);
+      }
+      if (effectiveVoice) {
+        tokenHeaders["x-voice"] = effectiveVoice;
+        setCurrentVoice(effectiveVoice);
+      }
+
       // Get a session token for OpenAI Realtime API through our authenticated server
-      const tokenResponse = await apiCall("/token");
+      const tokenResponse = await apiCall("/token", {
+        method: "GET",
+        headers: tokenHeaders,
+      });
       const data = await tokenResponse.json();
-      const EPHEMERAL_KEY = data.value;
+      const EPHEMERAL_KEY = data?.value || data?.client_secret?.value;
+      if (!EPHEMERAL_KEY || typeof EPHEMERAL_KEY !== "string") {
+        throw new Error("Missing ephemeral key from /api/token response");
+      }
 
       // Create a peer connection
       const pc = new RTCPeerConnection();
@@ -44,12 +98,14 @@ function RealtimeConsole() {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // Use our server as proxy instead of calling OpenAI directly
+      // Use our server as proxy for SDP exchange
+      // Send user JWT in Authorization (for server auth) and ephemeral key in custom header (for OpenAI)
       const sdpResponse = await apiCall("/session", {
         method: "POST",
         body: offer.sdp,
         headers: {
           "Content-Type": "text/plain",
+          "X-OpenAI-Ephemeral-Key": EPHEMERAL_KEY,
         },
       });
 
@@ -132,6 +188,31 @@ function RealtimeConsole() {
     sendClientEvent({ type: "response.create" });
   }
 
+  // Update session instructions during an active session
+  function updateSessionInstructions(instructions) {
+    if (!dataChannel) {
+      console.error("Cannot update instructions - no active session");
+      return;
+    }
+
+    const sessionUpdate = {
+      type: "session.update",
+      session: {
+        instructions: instructions,
+      },
+    };
+
+    sendClientEvent(sessionUpdate);
+    setCurrentSystemPrompt(instructions);
+  }
+
+  // Refresh saved settings when they are updated in Settings page
+  function refreshUserSettings() {
+    setSettingsLoaded(false);
+    setSavedSystemPrompt(null);
+    setSavedVoice(null);
+  }
+
   // Attach event listeners to the data channel when a new one is created
   useEffect(() => {
     if (dataChannel) {
@@ -154,35 +235,52 @@ function RealtimeConsole() {
   }, [dataChannel]);
 
   return (
-    <>
-      <DraggableHeader />
-      <main className="absolute top-16 left-0 right-0 bottom-0">
-        <section className="absolute top-0 left-0 right-[380px] bottom-0 flex">
-          <section className="absolute top-0 left-0 right-0 bottom-32 px-4 overflow-y-auto">
-            <EventLog events={events} />
-          </section>
-          <section className="absolute h-32 left-0 right-0 bottom-0 p-4">
-            <SessionControls
-              startSession={startSession}
+    <Router>
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <Console
+              isSessionActive={isSessionActive}
+              events={events}
+              startSession={(customPrompt, customVoice) => startSession(customPrompt || currentSystemPrompt, customVoice || currentVoice)}
               stopSession={stopSession}
               sendClientEvent={sendClientEvent}
               sendTextMessage={sendTextMessage}
-              events={events}
-              isSessionActive={isSessionActive}
+              updateSessionInstructions={updateSessionInstructions}
+              currentSystemPrompt={currentSystemPrompt}
+              currentVoice={currentVoice}
             />
-          </section>
-        </section>
-        <section className="absolute top-0 w-[380px] right-0 bottom-0 p-4 pt-0 overflow-y-auto">
-          <UserInfo />
-          <ToolPanel
-            sendClientEvent={sendClientEvent}
-            sendTextMessage={sendTextMessage}
-            events={events}
-            isSessionActive={isSessionActive}
-          />
-        </section>
-      </main>
-    </>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <Settings
+              isSessionActive={isSessionActive}
+              sendClientEvent={sendClientEvent}
+              sendTextMessage={sendTextMessage}
+              updateSessionInstructions={updateSessionInstructions}
+              currentSystemPrompt={currentSystemPrompt}
+              currentVoice={currentVoice}
+              events={events}
+              onVoiceChange={(voice) => {
+                // Voice changes only apply to new sessions
+                setCurrentVoice(voice);
+                refreshUserSettings(); // Refresh cached settings
+              }}
+              onPromptChange={(prompt) => {
+                // Prompt changes update current session if active, otherwise just refresh cache
+                if (isSessionActive) {
+                  updateSessionInstructions(prompt);
+                }
+                refreshUserSettings(); // Refresh cached settings
+              }}
+            />
+          }
+        />
+      </Routes>
+    </Router>
   );
 }
 

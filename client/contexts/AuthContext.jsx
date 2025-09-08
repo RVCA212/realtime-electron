@@ -290,27 +290,40 @@ export const AuthProvider = ({ children }) => {
   };
 
   const apiCall = async (endpoint, options = {}) => {
+    // Merge headers with custom headers taking precedence over defaults
+    const defaultHeaders = {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    };
+    
+    const mergedHeaders = {
+      ...defaultHeaders,
+      ...options.headers  // Custom headers override defaults
+    };
+
     let response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        ...options.headers
-      }
+      headers: mergedHeaders
     });
 
-    // If unauthorized, try to refresh token once
-    if (response.status === 401) {
+    // If unauthorized, try to refresh token once (except for /session which uses ephemeral key)
+    if (response.status === 401 && !endpoint.startsWith('/session')) {
       const refreshed = await refreshToken();
       if (refreshed) {
-        // Retry the request with new token
+        // Retry the request with new token, respecting custom headers
+        const retryDefaultHeaders = {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        };
+        
+        const retryMergedHeaders = {
+          ...retryDefaultHeaders,
+          ...options.headers  // Custom headers override defaults
+        };
+
         response = await fetch(`${API_BASE_URL}${endpoint}`, {
           ...options,
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            ...options.headers
-          }
+          headers: retryMergedHeaders
         });
       } else {
         await logout();

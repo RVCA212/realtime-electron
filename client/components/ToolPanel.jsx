@@ -1,43 +1,5 @@
 import { useEffect, useState } from "react";
 
-const functionDescription = `
-Call this function when a user asks for a color palette.
-`;
-
-const sessionUpdate = {
-  type: "session.update",
-  session: {
-    type: "realtime",
-    tools: [
-      {
-        type: "function",
-        name: "display_color_palette",
-        description: functionDescription,
-        parameters: {
-          type: "object",
-          strict: true,
-          properties: {
-            theme: {
-              type: "string",
-              description: "Description of the theme for the color scheme.",
-            },
-            colors: {
-              type: "array",
-              description: "Array of five hex color codes based on the theme.",
-              items: {
-                type: "string",
-                description: "Hex color code",
-              },
-            },
-          },
-          required: ["theme", "colors"],
-        },
-      },
-    ],
-    tool_choice: "auto",
-  },
-};
-
 function FunctionCallOutput({ functionCallOutput }) {
   const { theme, colors } = JSON.parse(functionCallOutput.arguments);
 
@@ -69,18 +31,37 @@ export default function ToolPanel({
   sendClientEvent,
   events,
 }) {
-  const [functionAdded, setFunctionAdded] = useState(false);
   const [functionCallOutput, setFunctionCallOutput] = useState(null);
 
   useEffect(() => {
     if (!events || events.length === 0) return;
 
-    const firstEvent = events[events.length - 1];
-    if (!functionAdded && firstEvent.type === "session.created") {
-      sendClientEvent(sessionUpdate);
-      setFunctionAdded(true);
-    }
+    console.log("🎨 ToolPanel - Processing events:", events.length);
 
+    // Check all recent events for function calls
+    events.forEach((event, index) => {
+      console.log(`🎨 ToolPanel - Event ${index}:`, event.type, event);
+
+      // Look for color palette function calls in various event types
+      if (event.type === "response.output_item.done" && event.item?.type === "function_call" && event.item?.name === "display_color_palette") {
+        console.log("🎨 ToolPanel - Found complete color palette function call:", event.item);
+        setFunctionCallOutput(event.item);
+
+        setTimeout(() => {
+          sendClientEvent({
+            type: "response.create",
+            response: {
+              instructions: `
+              ask for feedback about the color palette - don't repeat
+              the colors, just ask if they like the colors.
+            `,
+            },
+          });
+        }, 500);
+      }
+    });
+
+    // Also check for completed responses with function calls (legacy support)
     const mostRecentEvent = events[0];
     if (
       mostRecentEvent.type === "response.done" &&
@@ -91,13 +72,14 @@ export default function ToolPanel({
           output.type === "function_call" &&
           output.name === "display_color_palette"
         ) {
+          console.log("🎨 ToolPanel - Found color palette function call in response.done:", output);
           setFunctionCallOutput(output);
           setTimeout(() => {
             sendClientEvent({
               type: "response.create",
               response: {
                 instructions: `
-                ask for feedback about the color palette - don't repeat 
+                ask for feedback about the color palette - don't repeat
                 the colors, just ask if they like the colors.
               `,
               },
@@ -106,11 +88,10 @@ export default function ToolPanel({
         }
       });
     }
-  }, [events]);
+  }, [events, sendClientEvent]);
 
   useEffect(() => {
     if (!isSessionActive) {
-      setFunctionAdded(false);
       setFunctionCallOutput(null);
     }
   }, [isSessionActive]);
