@@ -22,3 +22,17 @@ body {
   font-size: 0.9rem;
   background-color: var(--color-base);
 }
+
+/* Draggable header styles for Electron */
+.draggable-header {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+/* Make interactive elements inside the draggable header clickable */
+.draggable-header button,
+.draggable-header input,
+.draggable-header a,
+.draggable-header [role="button"] {
+  -webkit-app-region: no-drag;
+}

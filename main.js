@@ -1,9 +1,16 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, safeStorage } from 'electron';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import Store from 'electron-store';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Initialize secure store
+const store = new Store({
+  name: 'openai-realtime-auth',
+  encryptionKey: 'openai-realtime-secure-key'
+});
 
 // Keep a global reference of the window object
 let mainWindow;
@@ -79,3 +86,81 @@ if (process.defaultApp) {
 } else {
   app.setAsDefaultProtocolClient('openai-realtime');
 }
+
+// IPC handlers for secure store operations
+ipcMain.handle('store-get', async (event, key) => {
+  try {
+    const encryptedValue = store.get(key);
+    if (!encryptedValue) return null;
+    
+    // If safeStorage is available, decrypt the value
+    if (safeStorage.isEncryptionAvailable() && Buffer.isBuffer(encryptedValue)) {
+      return safeStorage.decryptString(encryptedValue);
+    }
+    
+    // Fallback for non-encrypted values (backward compatibility)
+    return encryptedValue;
+  } catch (error) {
+    console.error('Error getting from store:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('store-set', async (event, key, value) => {
+  try {
+    // If safeStorage is available, encrypt the value
+    if (safeStorage.isEncryptionAvailable()) {
+      const encryptedValue = safeStorage.encryptString(value);
+      store.set(key, encryptedValue);
+    } else {
+      // Fallback for systems without encryption
+      store.set(key, value);
+    }
+    return true;
+  } catch (error) {
+    console.error('Error setting to store:', error);
+    return false;
+  }
+});
+
+ipcMain.handle('store-delete', async (event, key) => {
+  try {
+    store.delete(key);
+    return true;
+  } catch (error) {
+    console.error('Error deleting from store:', error);
+    return false;
+  }
+});
+
+ipcMain.handle('get-app-version', () => {
+  return app.getVersion();
+});
+
+ipcMain.handle('window-minimize', () => {
+  if (mainWindow) mainWindow.minimize();
+});
+
+ipcMain.handle('window-maximize', () => {
+  if (mainWindow) {
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+  }
+});
+
+ipcMain.handle('window-close', () => {
+  if (mainWindow) mainWindow.close();
+});
+
+ipcMain.handle('store-clear', async () => {
+  try {
+    store.clear();
+    return true;
+  } catch (error) {
+    console.error('Error clearing store:', error);
+    return false;
+  }
+});
