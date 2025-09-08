@@ -222,10 +222,41 @@ app.post("/api/session", authenticateToken, trackUsage, openaiLimiter, async (re
       body: fd,
     });
 
-    const sdp = await response.text();
     console.log('OpenAI API response status:', response.status);
     console.log('OpenAI API response headers:', Object.fromEntries(response.headers));
-    console.log('OpenAI API SDP response:', sdp);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('OpenAI API error response:', errorText);
+
+      let errorMessage = 'Failed to create session with OpenAI';
+      try {
+        const errorData = JSON.parse(errorText);
+        if (errorData.error?.message) {
+          errorMessage = errorData.error.message;
+        }
+      } catch (parseError) {
+        // If we can't parse the error, use the raw text
+        errorMessage = errorText || errorMessage;
+      }
+
+      return res.status(response.status).json({
+        error: errorMessage,
+        details: 'Please check your OpenAI API key and ensure you have access to the Realtime API'
+      });
+    }
+
+    const sdp = await response.text();
+    console.log('OpenAI API SDP response:', sdp.substring(0, 200) + '...');
+
+    // Validate that we received valid SDP data
+    if (!sdp.startsWith('v=')) {
+      console.error('Invalid SDP received from OpenAI:', sdp);
+      return res.status(500).json({
+        error: 'Invalid SDP response from OpenAI API',
+        details: 'The response does not appear to be valid SDP data'
+      });
+    }
 
     // Send back the SDP we received from the OpenAI REST API
     res.send(sdp);

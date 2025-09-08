@@ -7,7 +7,7 @@
     "dev": "concurrently --names \"SERVER,CLIENT,ELECTRON\" -c \"bgBlue.bold,bgMagenta.bold,bgGreen.bold\" \"npm run dev:server\" \"npm run dev:client\" \"npm run dev:electron\"",
     "dev:server": "cd remote-server && npm run dev",
     "dev:client": "vite",
-    "dev:electron": "wait-on http://localhost:3000 http://localhost:3001 && electron .",
+    "dev:electron": "wait-on http://localhost:3000 http://localhost:3001 && NODE_ENV=development electron .",
     "electron": "electron .",
     "build": "vite build",
     "build:electron": "npm run build && electron-builder",
@@ -16,6 +16,10 @@
     "lint": "eslint . --ext .js,.jsx --fix"
   },
   "dependencies": {
+    "@eslint/js": "^9.35.0",
+    "electron-store": "^10.1.0",
+    "eslint": "^9.35.0",
+    "eslint-plugin-react": "^7.37.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-feather": "^2.0.10"
